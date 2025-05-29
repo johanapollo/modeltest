@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Demo: Full Right-Arm Rig</title>
+  <title>Ragdoll Demo: Natural Joint Constraints</title>
 
   <!-- import map for Three.js & Cannon-es -->
   <script type="importmap">
@@ -15,9 +15,7 @@
   }
   </script>
 
-  <!-- suppress favicon 404 -->
   <link rel="icon" href="data:,">
-
   <style>
     body { margin:0; overflow:hidden; }
     #info {
@@ -37,19 +35,18 @@
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
     import * as CANNON       from 'cannon-es';
 
-    // — Scene & Camera —
+    // — Scene, Camera, Renderer —
     const scene    = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
-
     const camera   = new THREE.PerspectiveCamera(
       75, window.innerWidth/window.innerHeight, 0.1, 100
     );
-    camera.position.set(0, 3, 90);
-
+    camera.position.set(0, 3, 5);
     const renderer = new THREE.WebGLRenderer({ antialias:true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
+    // — Controls —
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0,1,0);
     controls.update();
@@ -57,14 +54,13 @@
     // — Helpers & Lights —
     scene.add(new THREE.AxesHelper(1), new THREE.GridHelper(10,10));
     scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
-    const dl = new THREE.DirectionalLight(0xffffff,0.8);
-    dl.position.set(5,10,7.5);
-    scene.add(dl, new THREE.AmbientLight(0xffffff,0.5));
+    const dirLight = new THREE.DirectionalLight(0xffffff,0.8);
+    dirLight.position.set(5,10,7.5);
+    scene.add(dirLight, new THREE.AmbientLight(0xffffff,0.5));
 
     // — Physics World —
     const world = new CANNON.World();
-    // re-enable gravity
-    world.gravity.set(0, -9.82, 0);
+    world.gravity.set(0, -9.82, 0);  // gravity on
     world.broadphase = new CANNON.NaiveBroadphase();
     world.solver.iterations = 10;
 
@@ -77,14 +73,14 @@
     loader.load(
       './models/model.gltf',
       gltf => {
-        infoEl.textContent = 'Model loaded. Setting up ragdoll…';
+        infoEl.textContent = 'Model loaded. Initializing ragdoll…';
 
-        // add & scale the model
+        // add & scale model
         const model = gltf.scene;
         model.scale.set(0.25,0.25,0.25);
         scene.add(model);
 
-        // skeleton helper
+        // skeleton overlay
         const skel = new THREE.SkeletonHelper(model);
         skel.material.linewidth = 2;
         scene.add(skel);
@@ -93,20 +89,20 @@
         let skinned = null;
         model.traverse(o => { if (o.isSkinnedMesh) skinned = o; });
         if (!skinned) {
-          infoEl.textContent = '⚠️ No SkinnedMesh found.';
+          infoEl.textContent = '⚠️ No rigged mesh found.';
           return;
         }
 
-        // 2) define all bone-pairs for the right arm
+        // 1) Define bone-pairs and joint types
         const bonePairs = [
-          { child: 'mixamorigRightForeArm', parent: 'mixamorigRightArm' },
-          { child: 'mixamorigRightArm',     parent: 'mixamorigRightShoulder' },
-          { child: 'mixamorigRightShoulder', parent: 'mixamorigSpine2' }
+          { child: 'mixamorigRightForeArm', parent: 'mixamorigRightArm',     type: 'hinge' },  // elbow
+          { child: 'mixamorigRightArm',     parent: 'mixamorigRightShoulder', type: 'cone'  },  // shoulder
+          { child: 'mixamorigRightShoulder',parent: 'mixamorigSpine2',       type: 'ball'  }   // connect to spine
         ];
 
-        // 3) create physics bodies and constraints
+        // 2) Create bodies & constraints
         const bodies = {};
-        bonePairs.forEach(({ child, parent }) => {
+        bonePairs.forEach(({ child, parent, type }) => {
           const bC = skinned.skeleton.getBoneByName(child);
           const bP = skinned.skeleton.getBoneByName(parent);
 
@@ -117,20 +113,48 @@
           const bodyC = new CANNON.Body({
             mass: 1,
             shape: new CANNON.Sphere(0.15),
-            position: v3ToC(posC)
+            position: v3ToC(posC),
+            angularDamping: 0.9,
+            linearDamping:  0.9
           });
           const bodyP = new CANNON.Body({
             mass: 0,
             shape: new CANNON.Sphere(0.15),
-            position: v3ToC(posP)
+            position: v3ToC(posP),
+            angularDamping: 0.9,
+            linearDamping:  0.9
           });
           world.addBody(bodyC);
           world.addBody(bodyP);
 
-          world.addConstraint(new CANNON.PointToPointConstraint(
-            bodyC, new CANNON.Vec3(0,0,0),
-            bodyP, new CANNON.Vec3(0,0,0)
-          ));
+          if (type === 'hinge') {
+            // elbow hinge: flex around local Z
+            const hinge = new CANNON.HingeConstraint(bodyC, bodyP, {
+              pivotA: new CANNON.Vec3(0,0,0),
+              axisA:  new CANNON.Vec3(0,0,1),
+              pivotB: new CANNON.Vec3(0,0,0),
+              axisB:  new CANNON.Vec3(0,0,1)
+            });
+            hinge.setLimits(-Math.PI*3/4, 0);
+            world.addConstraint(hinge);
+          } else if (type === 'cone') {
+            // shoulder cone-twist: ±45°
+            const cone = new CANNON.ConeTwistConstraint(bodyC, bodyP, {
+              pivotA: new CANNON.Vec3(0,0,0),
+              pivotB: new CANNON.Vec3(0,0,0),
+              axisA:  new CANNON.Vec3(1,0,0),
+              axisB:  new CANNON.Vec3(1,0,0),
+              angle:  Math.PI/4
+            });
+            world.addConstraint(cone);
+          } else {
+            // ball-and-socket fallback
+            const p2p = new CANNON.PointToPointConstraint(
+              bodyC, new CANNON.Vec3(0,0,0),
+              bodyP, new CANNON.Vec3(0,0,0)
+            );
+            world.addConstraint(p2p);
+          }
 
           bodies[child]  = bodyC;
           bodies[parent] = bodyP;
@@ -138,16 +162,16 @@
 
         infoEl.textContent = 'Ragdoll physics initialized.';
 
-        // 4) animation loop: step physics & drive bones
+        // 3) Animation loop: step physics & drive bones
         const clock = new THREE.Clock();
         (function animate() {
           requestAnimationFrame(animate);
 
-          // physics step
+          // step physics
           const dt = clock.getDelta();
           world.step(1/60, dt, 3);
 
-          // for each bone-pair, compute & apply rotation
+          // for each bone-pair, compute and apply rotation
           bonePairs.forEach(({ child, parent }) => {
             const bodyC = bodies[child], bodyP = bodies[parent];
             const boneC = skinned.skeleton.getBoneByName(child);
@@ -158,7 +182,7 @@
             const wP = cToV3(bodyP.position);
             const dir = wC.clone().sub(wP).normalize();
 
-            // quaternion rotating +X to dir
+            // quaternion rotating +X → dir
             const worldQuat = new THREE.Quaternion()
               .setFromUnitVectors(new THREE.Vector3(1,0,0), dir);
 
@@ -188,7 +212,7 @@
       }
     );
 
-    // handle window resize
+    // — Window resize —
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
