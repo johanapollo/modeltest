@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Rigging Step 2 (Explicit Bones)</title>
+  <title>Ragdoll Rigging Step 2 (Zero-G Markers)</title>
 
   <!-- IMPORT MAP -->
   <script type="importmap">
@@ -15,9 +15,7 @@
   }
   </script>
 
-  <!-- suppress favicon 404 -->
   <link rel="icon" href="data:,">
-
   <style>
     body { margin:0; overflow:hidden; }
     #info {
@@ -29,7 +27,7 @@
   </style>
 </head>
 <body>
-  <div id="info">Loading rig step 2…</div>
+  <div id="info">Loading step 2…</div>
 
   <script type="module">
     import * as THREE        from 'three';
@@ -44,7 +42,7 @@
     const camera = new THREE.PerspectiveCamera(
       75, window.innerWidth/window.innerHeight, 0.1, 100
     );
-    camera.position.set(0, 3, 5);
+    camera.position.set(0,3,5);
 
     const renderer = new THREE.WebGLRenderer({ antialias:true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -54,18 +52,18 @@
     controls.target.set(0,1,0);
     controls.update();
 
-    // — HELPERS & LIGHTING —
+    // — HELPERS & LIGHTS —
     scene.add(new THREE.AxesHelper(1));
     scene.add(new THREE.GridHelper(10,10));
     scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
-    const dirL = new THREE.DirectionalLight(0xffffff,0.8);
-    dirL.position.set(5,10,7.5);
-    scene.add(dirL);
+    const dl = new THREE.DirectionalLight(0xffffff,0.8);
+    dl.position.set(5,10,7.5);
+    scene.add(dl);
     scene.add(new THREE.AmbientLight(0xffffff,0.5));
 
-    // — PHYSICS WORLD —
+    // — PHYSICS WORLD (zero-G) —
     const world = new CANNON.World();
-    world.gravity.set(0,-9.82,0);
+    world.gravity.set(0,0,0);             // ← NO GRAVITY
     world.broadphase = new CANNON.NaiveBroadphase();
     world.solver.iterations = 10;
 
@@ -75,14 +73,13 @@
     // — INFO ELEMENT —
     const infoEl = document.getElementById('info');
 
-    // — LOADER & RIG STEP 2 —
+    // — LOAD MODEL & PLACE MARKERS —
     const loader = new GLTFLoader();
     loader.load(
       './models/model.gltf',
-      (gltf) => {
-        infoEl.textContent = 'Model loaded. Rigging…';
+      gltf => {
+        infoEl.textContent = 'Model loaded. Placing markers…';
 
-        // add and scale model
         const model = gltf.scene;
         model.scale.set(0.25,0.25,0.25);
         scene.add(model);
@@ -92,44 +89,29 @@
         skelHelper.material.linewidth = 2;
         scene.add(skelHelper);
 
-        // find the skinned mesh
+        // find SkinnedMesh
         let skinned = null;
-        model.traverse(o => { if (o.isSkinnedMesh) skinned = o; });
+        model.traverse(o => o.isSkinnedMesh && (skinned = o));
         if (!skinned) {
-          infoEl.textContent = '⚠️ No SkinnedMesh found.';
+          infoEl.textContent = '⚠️ No rigged mesh found.';
           return;
         }
 
-        console.log('All bone names:', skinned.skeleton.bones.map(b=>b.name));
+        // log bones so you can see names
+        console.log('Bones:', skinned.skeleton.bones.map(b=>b.name));
 
-        // explicitly target forearm (elbow) and upper arm (shoulder)
-        const childName  = 'mixamorig:RightForeArm';
-        const parentName = 'mixamorig:RightArm';
+        // pick the bone you saw at the elbow (example uses the first “right” match)
+        const childBone = skinned.skeleton.bones.find(b => /right/i.test(b.name));
+        const parentBone = childBone.parent;
 
-        const bone       = skinned.skeleton.getBoneByName(childName);
-        const parentBone = skinned.skeleton.getBoneByName(parentName);
-
-        if (!bone || !parentBone) {
-          console.error('Bone lookup failed:', childName, parentName);
-          infoEl.textContent = '⚠️ Could not find bones.';
-          return;
-        }
-
-        infoEl.textContent = `Bone: ${childName}, Parent: ${parentName}`;
-
-        // compute world positions
-        const posChild  = new THREE.Vector3();
-        const posParent = new THREE.Vector3();
-        bone.getWorldPosition(posChild);
-        parentBone.getWorldPosition(posParent);
-        console.log('Child pos:', posChild, 'Parent pos:', posParent);
+        infoEl.textContent = `Child: ${childBone.name}, Parent: ${parentBone.name}`;
 
         // helper to create always-on-top spheres
-        function createMarker(pos, color) {
+        function makeMarker(pos, color) {
           const mat = new THREE.MeshBasicMaterial({ color });
           mat.depthTest = false;
           const mesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 16, 16),
+            new THREE.SphereGeometry(0.2,16,16),
             mat
           );
           mesh.renderOrder = 999;
@@ -138,11 +120,17 @@
           return mesh;
         }
 
-        // red = elbow, blue = shoulder
-        const markerChild  = createMarker(posChild,  0xff0000);
-        const markerParent = createMarker(posParent, 0x0000ff);
+        // get world positions
+        const posChild  = new THREE.Vector3();
+        const posParent = new THREE.Vector3();
+        childBone .getWorldPosition(posChild);
+        parentBone.getWorldPosition(posParent);
 
-        // create physics bodies
+        // create markers
+        const markerChild  = makeMarker(posChild,  0xff0000); // red
+        const markerParent = makeMarker(posParent, 0x0000ff); // blue
+
+        // create matching zero-G bodies
         const bodyChild  = new CANNON.Body({
           mass: 1,
           shape: new CANNON.Sphere(0.2),
@@ -156,15 +144,15 @@
         world.addBody(bodyChild);
         world.addBody(bodyParent);
 
-        // connect them with a ball-and-socket
-        const constraint = new CANNON.PointToPointConstraint(
+        // ball-and-socket between them
+        world.addConstraint(new CANNON.PointToPointConstraint(
           bodyChild, new CANNON.Vec3(0,0,0),
           bodyParent, new CANNON.Vec3(0,0,0)
-        );
-        world.addConstraint(constraint);
-        infoEl.textContent += ' | Markers & joint added.';
+        ));
 
-        // animate physics & sync markers
+        infoEl.textContent += ' | Markers placed.';
+
+        // animate and sync
         const clock = new THREE.Clock();
         (function animate() {
           requestAnimationFrame(animate);
@@ -175,18 +163,18 @@
           renderer.render(scene, camera);
         })();
       },
-      (xhr) => {
-        const p = xhr.total ? ((xhr.loaded/xhr.total)*100).toFixed(0) : '?';
-        infoEl.textContent = `Loading model… ${p}%`;
+      xhr => {
+        const pct = xhr.total ? ((xhr.loaded/xhr.total)*100).toFixed(0) : '?';
+        infoEl.textContent = `Loading… ${pct}%`;
       },
-      (err) => {
-        console.error('Error loading:', err);
-        infoEl.textContent = 'Error loading model – check console.';
+      err => {
+        console.error(err);
+        infoEl.textContent = 'Error loading model – see console.';
       }
     );
 
-    // — HANDLE RESIZE —
-    window.addEventListener('resize', ()=>{
+    // — RESIZE HANDLER —
+    window.addEventListener('resize', ()=> {
       camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
