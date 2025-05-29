@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll: Driving Bone from Physics (Fixed invert())</title>
+  <title>Ragdoll Demo: Full Right-Arm Rig</title>
+
+  <!-- import map for Three.js & Cannon-es -->
   <script type="importmap">
   {
     "imports": {
@@ -12,7 +14,10 @@
     }
   }
   </script>
+
+  <!-- suppress favicon 404 -->
   <link rel="icon" href="data:,">
+
   <style>
     body { margin:0; overflow:hidden; }
     #info {
@@ -36,11 +41,13 @@
     const scene    = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
 
-    const camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 100);
+    const camera   = new THREE.PerspectiveCamera(
+      75, window.innerWidth/window.innerHeight, 0.1, 100
+    );
     camera.position.set(0, 3, 5);
 
     const renderer = new THREE.WebGLRenderer({ antialias:true });
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -54,9 +61,10 @@
     dl.position.set(5,10,7.5);
     scene.add(dl, new THREE.AmbientLight(0xffffff,0.5));
 
-    // — Physics World (zero-G) —
+    // — Physics World —
     const world = new CANNON.World();
-    world.gravity.set(0,0,0);
+    // re-enable gravity
+    world.gravity.set(0, -9.82, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
     world.solver.iterations = 10;
 
@@ -69,9 +77,9 @@
     loader.load(
       './models/model.gltf',
       gltf => {
-        infoEl.textContent = 'Model loaded. Setting up…';
+        infoEl.textContent = 'Model loaded. Setting up ragdoll…';
 
-        // add & scale model
+        // add & scale the model
         const model = gltf.scene;
         model.scale.set(0.25,0.25,0.25);
         scene.add(model);
@@ -81,103 +89,110 @@
         skel.material.linewidth = 2;
         scene.add(skel);
 
-        // find skinned mesh & bones
+        // find the SkinnedMesh
         let skinned = null;
-        model.traverse(o => o.isSkinnedMesh && (skinned = o));
+        model.traverse(o => { if (o.isSkinnedMesh) skinned = o; });
         if (!skinned) {
-          infoEl.textContent = '⚠️ No skinned mesh!';
+          infoEl.textContent = '⚠️ No SkinnedMesh found.';
           return;
         }
 
-        const childName  = 'mixamorigRightForeArm'; // elbow
-        const parentName = 'mixamorigRightArm';     // shoulder
+        // 2) define all bone-pairs for the right arm
+        const bonePairs = [
+          { child: 'mixamorigRightForeArm', parent: 'mixamorigRightArm' },
+          { child: 'mixamorigRightArm',     parent: 'mixamorigRightShoulder' },
+          { child: 'mixamorigRightShoulder', parent: 'mixamorigSpine2' }
+        ];
 
-        const childBone  = skinned.skeleton.getBoneByName(childName);
-        const parentBone = skinned.skeleton.getBoneByName(parentName);
+        // 3) create physics bodies and constraints
+        const bodies = {};
+        bonePairs.forEach(({ child, parent }) => {
+          const bC = skinned.skeleton.getBoneByName(child);
+          const bP = skinned.skeleton.getBoneByName(parent);
 
-        if (!childBone || !parentBone) {
-          infoEl.textContent = '❌ Bone lookup failed';
-          console.error(childBone, parentBone);
-          return;
-        }
+          const posC = new THREE.Vector3(), posP = new THREE.Vector3();
+          bC.getWorldPosition(posC);
+          bP.getWorldPosition(posP);
 
-        infoEl.textContent = `Driving ${childName} from physics`;
+          const bodyC = new CANNON.Body({
+            mass: 1,
+            shape: new CANNON.Sphere(0.15),
+            position: v3ToC(posC)
+          });
+          const bodyP = new CANNON.Body({
+            mass: 0,
+            shape: new CANNON.Sphere(0.15),
+            position: v3ToC(posP)
+          });
+          world.addBody(bodyC);
+          world.addBody(bodyP);
 
-        // create physics bodies
-        const posChild  = new THREE.Vector3();
-        const posParent = new THREE.Vector3();
-        childBone.getWorldPosition(posChild);
-        parentBone.getWorldPosition(posParent);
+          world.addConstraint(new CANNON.PointToPointConstraint(
+            bodyC, new CANNON.Vec3(0,0,0),
+            bodyP, new CANNON.Vec3(0,0,0)
+          ));
 
-        const bodyChild = new CANNON.Body({
-          mass: 1,
-          shape: new CANNON.Sphere(0.15),
-          position: v3ToC(posChild)
+          bodies[child]  = bodyC;
+          bodies[parent] = bodyP;
         });
-        const bodyParent = new CANNON.Body({
-          mass: 0,
-          shape: new CANNON.Sphere(0.15),
-          position: v3ToC(posParent)
-        });
-        world.addBody(bodyChild);
-        world.addBody(bodyParent);
 
-        // ball-and-socket
-        world.addConstraint(new CANNON.PointToPointConstraint(
-          bodyChild, new CANNON.Vec3(0,0,0),
-          bodyParent, new CANNON.Vec3(0,0,0)
-        ));
+        infoEl.textContent = 'Ragdoll physics initialized.';
 
-        // — Corrected animate loop —
+        // 4) animation loop: step physics & drive bones
         const clock = new THREE.Clock();
         (function animate() {
           requestAnimationFrame(animate);
 
-          // step physics
+          // physics step
           const dt = clock.getDelta();
           world.step(1/60, dt, 3);
 
-          // compute world direction from shoulder → elbow
-          const wChild = cToV3(bodyChild.position);
-          const wParent = cToV3(bodyParent.position);
-          const dir = wChild.clone().sub(wParent).normalize();
+          // for each bone-pair, compute & apply rotation
+          bonePairs.forEach(({ child, parent }) => {
+            const bodyC = bodies[child], bodyP = bodies[parent];
+            const boneC = skinned.skeleton.getBoneByName(child);
+            const boneP = skinned.skeleton.getBoneByName(parent);
 
-          // quaternion that rotates +X to dir
-          const worldQuat = new THREE.Quaternion()
-            .setFromUnitVectors(new THREE.Vector3(1,0,0), dir);
+            // world positions
+            const wC = cToV3(bodyC.position);
+            const wP = cToV3(bodyP.position);
+            const dir = wC.clone().sub(wP).normalize();
 
-          // get parent’s world rotation
-          parentBone.updateWorldMatrix(true,false);
-          const parentWorldQuat = new THREE.Quaternion();
-          parentBone.getWorldQuaternion(parentWorldQuat);
+            // quaternion rotating +X to dir
+            const worldQuat = new THREE.Quaternion()
+              .setFromUnitVectors(new THREE.Vector3(1,0,0), dir);
 
-          // **clone & invert** instead of .inverse()
-          const invParent = parentWorldQuat.clone().invert();
+            // get parent's world rotation
+            boneP.updateWorldMatrix(true,false);
+            const pwq = new THREE.Quaternion();
+            boneP.getWorldQuaternion(pwq);
 
-          // compute local rotation for the child bone
-          const localQuat = invParent.multiply(worldQuat);
+            // invert & compute local
+            const invPwq = pwq.clone().invert();
+            const localQuat = invPwq.multiply(worldQuat);
 
-          // apply to the forearm bone
-          childBone.quaternion.copy(localQuat);
+            // apply to child bone
+            boneC.quaternion.copy(localQuat);
+          });
 
           renderer.render(scene, camera);
         })();
       },
       xhr => {
-        const p = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?';
-        infoEl.textContent = `Loading… ${p}%`;
+        const pct = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?';
+        infoEl.textContent = `Loading… ${pct}%`;
       },
       err => {
-        console.error('Load error:', err);
-        infoEl.textContent = '❌ Load error';
+        console.error('Error loading model:', err);
+        infoEl.textContent = '❌ Load error – check console.';
       }
     );
 
-    // handle resize
+    // handle window resize
     window.addEventListener('resize', () => {
-      camera.aspect = innerWidth/innerHeight;
+      camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth, innerHeight);
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
   </script>
 </body>
