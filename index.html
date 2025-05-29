@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Demo: Custom Model</title>
-  <!-- import map to resolve bare imports -->
+  <title>Ragdoll Demo: Custom Model (Scaled)</title>
+  <!-- Import map to resolve bare imports -->
   <script type="importmap">
   {
     "imports": {
@@ -38,12 +38,12 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
 
-    const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
     camera.position.set(0, 1.6, 3);
 
     // — Renderer —
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
     // — Lights —
@@ -67,6 +67,10 @@
       gltf => {
         infoEl.textContent = 'Custom model loaded!';
         const model = gltf.scene;
+
+        // — Scale model down to half size —
+        model.scale.set(0.5, 0.5, 0.5);
+
         scene.add(model);
 
         // Optional: show skeleton if it's rigged
@@ -93,9 +97,9 @@
 
     // — Handle Resize —
     window.addEventListener('resize', () => {
-      camera.aspect = innerWidth/innerHeight;
+      camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth, innerHeight);
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
     // — Render Loop —
