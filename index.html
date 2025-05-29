@@ -2,15 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Rigging Step 1 (Textures & Marker Fix)</title>
+  <title>Ragdoll Rigging Step 1 (No Physics)</title>
 
-  <!-- IMPORT MAP -->
+  <!-- import map for Three.js -->
   <script type="importmap">
   {
     "imports": {
-      "three":    "https://unpkg.com/three@0.150.1/build/three.module.js",
-      "three/":   "https://unpkg.com/three@0.150.1/",
-      "cannon-es":"https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+      "three":   "https://unpkg.com/three@0.150.1/build/three.module.js",
+      "three/":  "https://unpkg.com/three@0.150.1/"
     }
   }
   </script>
@@ -19,137 +18,134 @@
   <link rel="icon" href="data:,">
 
   <style>
-    body { margin:0; overflow:hidden; }
+    body { margin: 0; overflow: hidden; }
     #info {
-      position:absolute; top:8px; left:8px;
-      padding:4px 8px; background:rgba(0,0,0,0.6);
-      color:#fff; font-family:sans-serif; font-size:13px;
-      z-index:10;
+      position: absolute; top: 8px; left: 8px;
+      padding: 4px 8px; background: rgba(0,0,0,0.6);
+      color: #fff; font-family: sans-serif; font-size: 13px;
+      z-index: 10;
     }
   </style>
 </head>
 <body>
-  <div id="info">Loading and rigging…</div>
+  <div id="info">Loading model…</div>
 
   <script type="module">
     import * as THREE        from 'three';
     import { GLTFLoader }    from 'three/examples/jsm/loaders/GLTFLoader.js';
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-    import * as CANNON       from 'cannon-es';
 
-    // — SCENE & CAMERA —
-    const scene     = new THREE.Scene();
+    // — Scene & Camera —
+    const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
 
-    const camera    = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      100
+    );
     camera.position.set(0, 3, 5);
 
-    // — RENDERER —
-    const renderer  = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // — CONTROLS —
-    const controls  = new OrbitControls(camera, renderer.domElement);
+    // — Controls —
+    const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 1, 0);
     controls.update();
 
-    // — LIGHTING (keep original materials and textures) —
+    // — Helpers —
+    scene.add(new THREE.GridHelper(10, 10));
+    scene.add(new THREE.AxesHelper(2));
+
+    // — Lighting —
     scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
     dirLight.position.set(5, 10, 7.5);
     scene.add(dirLight);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-    // — PHYSICS WORLD —
-    const world = new CANNON.World();
-    world.gravity.set(0, 0, 0);
-    world.broadphase = new CANNON.NaiveBroadphase();
-    world.solver.iterations = 10;
-
-    const v3ToC  = v => new CANNON.Vec3(v.x, v.y, v.z);
-    const cToV3  = c => new THREE.Vector3(c.x, c.y, c.z);
-
-    // — LOAD MODEL & SET UP RIG —
+    // — Info Element —
     const infoEl = document.getElementById('info');
-    const loader = new GLTFLoader();
 
+    // — Load Model & Show Skeleton + Marker —
+    const loader = new GLTFLoader();
     loader.load(
       './models/model.gltf',
       gltf => {
-        infoEl.textContent = 'Model loaded. Processing…';
-
-        // add your model (keep its original PBR materials & textures)
+        infoEl.textContent = 'Model loaded.';
         const model = gltf.scene;
         model.scale.set(0.25, 0.25, 0.25);
         scene.add(model);
 
-        // show skeleton helper (optional)
-        const skHelper = new THREE.SkeletonHelper(model);
-        skHelper.material.linewidth = 2;
-        scene.add(skHelper);
+        // log entire scene graph
+        console.log('Scene graph:', model);
+        model.traverse(o => console.log(o.type, o.name));
 
-        // find the first SkinnedMesh
+        // find the SkinnedMesh
         let skinned = null;
-        model.traverse(o => { if (o.isSkinnedMesh) skinned = o; });
-        if (!skinned) {
-          console.warn('No skinned mesh found.');
-          infoEl.textContent = '⚠️ No skinned mesh; cannot place marker.';
-          return;
-        }
-
-        // log bone names to console for inspection
-        console.log('All bones:', skinned.skeleton.bones.map(b => b.name));
-
-        // pick a bone with "right" in its name, or default to the first bone
-        const boneName = skinned.skeleton.bones.find(b => /right/i.test(b.name))?.name 
-                         || skinned.skeleton.bones[0].name;
-        const bone = skinned.skeleton.getBoneByName(boneName);
-        infoEl.textContent = `Using bone: ${bone.name}`;
-
-        // create a visible red sphere (bigger so you can see it)
-        const marker = new THREE.Mesh(
-          new THREE.SphereGeometry(0.1), 
-          new THREE.MeshBasicMaterial({ color: 0xff0000 })
-        );
-        scene.add(marker);
-
-        // position the marker at the bone's world position
-        bone.getWorldPosition(marker.position);
-
-        // create a matching Cannon body
-        const body = new CANNON.Body({
-          mass: 0.1,
-          shape: new CANNON.Sphere(0.1),
-          position: v3ToC(marker.position)
+        model.traverse(o => {
+          if (o.isSkinnedMesh) skinned = o;
         });
-        world.addBody(body);
 
-        infoEl.textContent += ' | Marker & body created.';
+        if (skinned) {
+          console.log('SkinnedMesh found:', skinned);
+          // show skeleton
+          const skHelper = new THREE.SkeletonHelper(skinned);
+          skHelper.material.linewidth = 3;
+          skHelper.material.color.set(0x00ff00);
+          scene.add(skHelper);
+          infoEl.textContent += ' | SkeletonHelper added.';
 
-        // animate: step physics → update marker
-        const clock = new THREE.Clock();
-        (function animate() {
-          requestAnimationFrame(animate);
-          const dt = clock.getDelta();
-          world.step(1/60, dt, 3);
-          marker.position.copy(cToV3(body.position));
-          renderer.render(scene, camera);
-        })();
+          // pick a bone
+          const bone =
+            skinned.skeleton.bones.find(b => /right/i.test(b.name)) ||
+            skinned.skeleton.bones[0];
+          console.log('Using bone:', bone.name);
+          infoEl.textContent += ' | Bone: ' + bone.name;
+
+          // place a red sphere marker
+          const pos = new THREE.Vector3();
+          bone.getWorldPosition(pos);
+          const marker = new THREE.Mesh(
+            new THREE.SphereGeometry(0.1, 16, 16),
+            new THREE.MeshBasicMaterial({ color: 0xff0000 })
+          );
+          marker.position.copy(pos);
+          // always render on top
+          marker.renderOrder = 999;
+          marker.material.depthTest = false;
+          scene.add(marker);
+          infoEl.textContent += ' | Marker added.';
+        } else {
+          console.warn('No SkinnedMesh found in the model.');
+          infoEl.textContent += ' | No rigged mesh.';
+        }
       },
       xhr => {
-        const pct = xhr.total ? (xhr.loaded / xhr.total * 100).toFixed(0) : '?';
+        const pct = xhr.total
+          ? ((xhr.loaded / xhr.total) * 100).toFixed(0)
+          : '?';
         infoEl.textContent = `Loading model… ${pct}%`;
       },
       err => {
         console.error('Error loading model:', err);
-        infoEl.textContent = 'Error loading model – check console';
+        infoEl.textContent = 'Error loading model – check console.';
       }
     );
 
-    // — HANDLE RESIZE —
+    // — Render Loop —
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // — Handle Resize —
     window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
