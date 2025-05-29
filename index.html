@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Demo with Import Map</title>
-  <!-- 1) Import map to resolve "three" and sub-paths -->
+  <title>Ragdoll Demo: Skeleton Test</title>
   <script type="importmap">
   {
     "imports": {
@@ -18,52 +17,69 @@
   </style>
 </head>
 <body>
-  <!-- 2) Your module script – now bare imports will work! -->
   <script type="module">
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-    // — Scene & Camera —
+    // Scene & Camera
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111);
+    scene.background = new THREE.Color(0x222222);
+    const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
+    camera.position.set(0, 1.6, 3);
 
-    const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
-    camera.position.set(0, 1.5, 3);
-
-    // — Renderer —
+    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(innerWidth, innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // — Lights —
+    // Lights
     scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
     const dir = new THREE.DirectionalLight(0xffffff, 0.8);
     dir.position.set(5, 10, 7.5);
     scene.add(dir);
 
-    // — Controls —
+    // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 1, 0);
     controls.update();
 
-    // — Load a GLTF model —
+    // Load a **rigged** GLTF model
     const loader = new GLTFLoader();
     loader.load(
-      'https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf',
-      gltf => scene.add(gltf.scene),
-      xhr => console.log(`Loading ${ (xhr.loaded/xhr.total*100).toFixed(0) }%`),
-      err => console.error('Error:', err)
+      'https://threejs.org/examples/models/gltf/CesiumMan/glTF/CesiumMan.gltf',
+      gltf => {
+        const model = gltf.scene;
+        scene.add(model);
+
+        // Find the first SkinnedMesh
+        let skinnedMesh = null;
+        model.traverse(obj => {
+          if (obj.isSkinnedMesh) skinnedMesh = obj;
+        });
+
+        if (skinnedMesh) {
+          // Show the skeleton bones
+          const helper = new THREE.SkeletonHelper(skinnedMesh);
+          helper.material.linewidth = 2;
+          scene.add(helper);
+          console.log('Skeleton helper added for:', skinnedMesh.name);
+        } else {
+          console.warn('No SkinnedMesh found in this model.');
+        }
+      },
+      xhr => console.log(`Loading ${(xhr.loaded/xhr.total*100).toFixed(0)}%`),
+      err => console.error('Error loading model:', err)
     );
 
-    // — Handle Resize —
+    // Handle Resize
     window.addEventListener('resize', () => {
       camera.aspect = innerWidth/innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(innerWidth, innerHeight);
     });
 
-    // — Render Loop —
+    // Render Loop
     (function animate() {
       requestAnimationFrame(animate);
       renderer.render(scene, camera);
