@@ -2,16 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Demo: Custom Model (Scaled)</title>
-  <!-- Import map to resolve bare imports -->
+  <title>Ragdoll Demo: Custom Model (Fixed Import Map)</title>
+
+  <!-- VALID JSON: no comments, no trailing commas -->
   <script type="importmap">
-  {// — Scene & Camera —
+  {
     "imports": {
       "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
       "three/": "https://unpkg.com/three@0.150.1/"
     }
   }
   </script>
+
+  <!-- Prevent favicon 404 -->
+  <link rel="icon" href="data:," />
+
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
@@ -38,8 +43,9 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
 
-    const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.6, 6);
+    // Wider FOV + pulled-back camera
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
+    camera.position.set(0, 1.6, 5);
 
     // — Renderer —
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -57,23 +63,22 @@
     controls.target.set(0, 1, 0);
     controls.update();
 
-    // — GLTF Loader for your local model —
+    // — GLTF Loader for local model —
     const infoEl = document.getElementById('info');
     const loader = new GLTFLoader();
 
     loader.load(
-      // Relative path to your committed model:
-      './models/model.gltf',
+      './models/model.gltf',  // your local file
       gltf => {
         infoEl.textContent = 'Custom model loaded!';
         const model = gltf.scene;
 
-        // — Scale model down to half size —
+        // Scale down
         model.scale.set(0.25, 0.25, 0.25);
 
         scene.add(model);
 
-        // Optional: show skeleton if it's rigged
+        // Optional: show skeleton if rigged
         let skinned = null;
         model.traverse(o => {
           if (o.isSkinnedMesh) skinned = o;
@@ -90,7 +95,7 @@
         infoEl.textContent = `Loading… ${pct}%`;
       },
       err => {
-        console.error('Error loading local model:', err);
+        console.error('Error loading model:', err);
         infoEl.textContent = 'Error loading model – see console';
       }
     );
