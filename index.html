@@ -2,116 +2,143 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Demo: Custom Model (Fixed Import Map)</title>
+  <title>Ragdoll Rigging Step 1</title>
 
-  <!-- VALID JSON: no comments, no trailing commas -->
+  <!-- IMPORT MAP -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
-      "three/": "https://unpkg.com/three@0.150.1/"
+      "three":    "https://unpkg.com/three@0.150.1/build/three.module.js",
+      "three/":   "https://unpkg.com/three@0.150.1/",
+      "cannon-es":"https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
     }
   }
   </script>
 
-  <!-- Prevent favicon 404 -->
-  <link rel="icon" href="data:," />
-
+  <link rel="icon" href="data:,"/>
   <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
+    body { margin:0; overflow:hidden; }
     #info {
-      position: absolute;
-      top: 8px; left: 8px;
-      padding: 4px 8px;
-      background: rgba(0,0,0,0.5);
-      color: #fff;
-      font-family: sans-serif;
-      font-size: 13px;
+      position:absolute; top:8px; left:8px;
+      padding:4px 8px; background:rgba(0,0,0,0.5);
+      color:#fff; font-family:sans-serif; font-size:13px;
     }
   </style>
 </head>
 <body>
-  <div id="info">Loading custom model…</div>
+  <div id="info">Loading and rigging…</div>
 
   <script type="module">
-    import * as THREE from 'three';
-    import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+    import * as THREE       from 'three';
+    import { GLTFLoader }   from 'three/examples/jsm/loaders/GLTFLoader.js';
+    import { OrbitControls }from 'three/examples/jsm/controls/OrbitControls.js';
+    import * as CANNON      from 'cannon-es';
 
-    // — Scene & Camera —
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x222222);
+    // — SCENE SETUP —
+    const scene    = new THREE.Scene();
+    scene.background= new THREE.Color(0x222222);
 
-    // Wider FOV + pulled-back, raised camera
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(0, 3, 100);
+    const camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 100);
+    camera.position.set(0, 3, 5);
 
-    // — Renderer —
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(innerWidth, innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // — Lights —
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-    dir.position.set(5, 10, 7.5);
-    scene.add(dir);
-
-    // — Controls —
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1, 0);
+    controls.target.set(0,1,0);
     controls.update();
 
-    // — GLTF Loader for local model —
+    // — PHYSICS WORLD —
+    const world = new CANNON.World();
+    world.gravity.set(0, 0, 0);       // zero‐g for floating
+    world.broadphase = new CANNON.NaiveBroadphase();
+    world.solver.iterations = 10;
+
+    // helper to sync three.Vector3 ↔ cannon.Vec3
+    function v3ToCannon(v){ return new CANNON.Vec3(v.x, v.y, v.z); }
+    function cannonToV3(c){ return new THREE.Vector3(c.x, c.y, c.z); }
+
+    // — LOAD YOUR MODEL —
     const infoEl = document.getElementById('info');
     const loader = new GLTFLoader();
 
     loader.load(
-      './models/model.gltf',  // your local file
+      './models/model.gltf',
       gltf => {
-        infoEl.textContent = 'Custom model loaded!';
+        infoEl.textContent = 'Model loaded. Building rig…';
         const model = gltf.scene;
-
-        // Scale down
-        model.scale.set(0.25, 0.25, 0.25);
-
+        model.scale.set(0.25,0.25,0.25);
         scene.add(model);
 
-        // Optional: show skeleton if rigged
+        // find the first skinned mesh
         let skinned = null;
-        model.traverse(o => {
-          if (o.isSkinnedMesh) skinned = o;
-        });
-        if (skinned) {
-          const helper = new THREE.SkeletonHelper(skinned);
-          helper.material.linewidth = 2;
-          scene.add(helper);
-          console.log('SkeletonHelper added for:', skinned.name);
+        model.traverse(o => o.isSkinnedMesh && (skinned=o));
+        if(!skinned){
+          infoEl.textContent = '⚠️ No skinned mesh found';
+          return;
         }
+
+        // pick the right-upper arm bone
+        const bone = skinned.skeleton.getBoneByName('mixamorig_RightArm');
+        if(!bone){
+          console.warn('Bone not found:', skinned.skeleton.bones.map(b=>b.name));
+          infoEl.textContent = '⚠️ RightArm bone not found';
+          return;
+        }
+
+        // create a THREE.js marker
+        const marker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.02),
+          new THREE.MeshBasicMaterial({color:0xff0000})
+        );
+        scene.add(marker);
+
+        // create a Cannon.js body at that position
+        const body = new CANNON.Body({
+          mass: 0.1,
+          shape: new CANNON.Sphere(0.02),
+          position: v3ToCannon(new THREE.Vector3())
+        });
+        // initialize body at bone world‐pos
+        bone.getWorldPosition(marker.position);
+        body.position.copy(v3ToCannon(marker.position));
+        world.addBody(body);
+
+        infoEl.textContent = 'Rig step 1 complete: RightArm body created';
+
+        // ANIMATE: sync body↔marker, then (later) bone
+        const clock = new THREE.Clock();
+        (function animate(){
+          requestAnimationFrame(animate);
+
+          // step physics
+          const dt = clock.getDelta();
+          world.step(1/60, dt, 3);
+
+          // sync marker to physics
+          marker.position.copy(cannonToV3(body.position));
+
+          // TODO next: constrain this body to its parent bone…
+          renderer.render(scene, camera);
+        })();
       },
       xhr => {
-        const pct = xhr.total ? (xhr.loaded / xhr.total * 100).toFixed(0) : '?';
-        infoEl.textContent = `Loading… ${pct}%`;
+        const p = xhr.total?((xhr.loaded/xhr.total*100).toFixed(0)):'?';
+        infoEl.textContent = `Loading model… ${p}%`;
       },
       err => {
-        console.error('Error loading model:', err);
-        infoEl.textContent = 'Error loading model – see console';
+        console.error(err);
+        infoEl.textContent = 'Error loading model';
       }
     );
 
-    // — Handle Resize —
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth/window.innerHeight;
+    // — HANDLE RESIZE —
+    window.addEventListener('resize', ()=>{
+      camera.aspect = innerWidth/innerHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(innerWidth, innerHeight);
     });
-
-    // — Render Loop —
-    (function animate() {
-      requestAnimationFrame(animate);
-      renderer.render(scene, camera);
-    })();
   </script>
 </body>
 </html>
