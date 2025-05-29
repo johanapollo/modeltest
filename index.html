@@ -5,7 +5,7 @@
   <title>Ragdoll Demo: Custom Model (Scaled)</title>
   <!-- Import map to resolve bare imports -->
   <script type="importmap">
-  {
+  {// — Scene & Camera —
     "imports": {
       "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
       "three/": "https://unpkg.com/three@0.150.1/"
@@ -39,7 +39,7 @@
     scene.background = new THREE.Color(0x222222);
 
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.6, 3);
+    camera.position.set(0, 1.6, 6);
 
     // — Renderer —
     const renderer = new THREE.WebGLRenderer({ antialias: true });
