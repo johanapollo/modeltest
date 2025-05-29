@@ -2,9 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll: Driving Bone from Physics</title>
-
-  <!-- import map for Three.js & Cannon-es -->
+  <title>Ragdoll: Driving Bone from Physics (Fixed invert())</title>
   <script type="importmap">
   {
     "imports": {
@@ -14,7 +12,6 @@
     }
   }
   </script>
-
   <link rel="icon" href="data:,">
   <style>
     body { margin:0; overflow:hidden; }
@@ -39,9 +36,7 @@
     const scene    = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
 
-    const camera   = new THREE.PerspectiveCamera(
-      75, innerWidth/innerHeight, 0.1, 100
-    );
+    const camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 100);
     camera.position.set(0, 3, 5);
 
     const renderer = new THREE.WebGLRenderer({ antialias:true });
@@ -59,9 +54,9 @@
     dl.position.set(5,10,7.5);
     scene.add(dl, new THREE.AmbientLight(0xffffff,0.5));
 
-    // — Physics World —
+    // — Physics World (zero-G) —
     const world = new CANNON.World();
-    world.gravity.set(0,0,0);  // keep zero-G for now
+    world.gravity.set(0,0,0);
     world.broadphase = new CANNON.NaiveBroadphase();
     world.solver.iterations = 10;
 
@@ -76,7 +71,7 @@
       gltf => {
         infoEl.textContent = 'Model loaded. Setting up…';
 
-        // add model and scale
+        // add & scale model
         const model = gltf.scene;
         model.scale.set(0.25,0.25,0.25);
         scene.add(model);
@@ -86,30 +81,29 @@
         skel.material.linewidth = 2;
         scene.add(skel);
 
-        // find the skinned mesh
+        // find skinned mesh & bones
         let skinned = null;
         model.traverse(o => o.isSkinnedMesh && (skinned = o));
         if (!skinned) {
-          infoEl.textContent = '⚠️ No skinned mesh found.';
+          infoEl.textContent = '⚠️ No skinned mesh!';
           return;
         }
 
-        // bone names from your list
-        const childName  = 'mixamorigRightForeArm';  // elbow
-        const parentName = 'mixamorigRightArm';      // shoulder
+        const childName  = 'mixamorigRightForeArm'; // elbow
+        const parentName = 'mixamorigRightArm';     // shoulder
 
         const childBone  = skinned.skeleton.getBoneByName(childName);
         const parentBone = skinned.skeleton.getBoneByName(parentName);
 
         if (!childBone || !parentBone) {
-          infoEl.textContent = '❌ Bone lookup failed.';
-          console.error('Bones:', childBone, parentBone);
+          infoEl.textContent = '❌ Bone lookup failed';
+          console.error(childBone, parentBone);
           return;
         }
 
         infoEl.textContent = `Driving ${childName} from physics`;
 
-        // Create physics bodies
+        // create physics bodies
         const posChild  = new THREE.Vector3();
         const posParent = new THREE.Vector3();
         childBone.getWorldPosition(posChild);
@@ -128,58 +122,58 @@
         world.addBody(bodyChild);
         world.addBody(bodyParent);
 
-        // Connect with ball-and-socket
+        // ball-and-socket
         world.addConstraint(new CANNON.PointToPointConstraint(
           bodyChild, new CANNON.Vec3(0,0,0),
           bodyParent, new CANNON.Vec3(0,0,0)
         ));
 
-        // Animation loop
+        // — Corrected animate loop —
         const clock = new THREE.Clock();
         (function animate() {
           requestAnimationFrame(animate);
 
-          // 1) Step physics
+          // step physics
           const dt = clock.getDelta();
           world.step(1/60, dt, 3);
 
-          // 2) Sync debug markers (optional)
-          // markerChild.position.copy(cToV3(bodyChild.position));
-          // markerParent.position.copy(cToV3(bodyParent.position));
+          // compute world direction from shoulder → elbow
+          const wChild = cToV3(bodyChild.position);
+          const wParent = cToV3(bodyParent.position);
+          const dir = wChild.clone().sub(wParent).normalize();
 
-          // 3) Compute world‐space bone direction
-          const wPosChild  = cToV3(bodyChild.position);
-          const wPosParent = cToV3(bodyParent.position);
-          const dir = wPosChild.clone().sub(wPosParent).normalize();
-
-          // 4) Build a quaternion that rotates +X to align with dir
+          // quaternion that rotates +X to dir
           const worldQuat = new THREE.Quaternion()
             .setFromUnitVectors(new THREE.Vector3(1,0,0), dir);
 
-          // 5) Convert worldQuat into parent‐bone local space
+          // get parent’s world rotation
           parentBone.updateWorldMatrix(true,false);
           const parentWorldQuat = new THREE.Quaternion();
           parentBone.getWorldQuaternion(parentWorldQuat);
-          const localQuat = parentWorldQuat.inverse().multiply(worldQuat);
 
-          // 6) Apply to the forearm bone
+          // **clone & invert** instead of .inverse()
+          const invParent = parentWorldQuat.clone().invert();
+
+          // compute local rotation for the child bone
+          const localQuat = invParent.multiply(worldQuat);
+
+          // apply to the forearm bone
           childBone.quaternion.copy(localQuat);
 
-          // 7) Render
           renderer.render(scene, camera);
         })();
       },
       xhr => {
-        const pct = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?';
-        infoEl.textContent = `Loading… ${pct}%`;
+        const p = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?';
+        infoEl.textContent = `Loading… ${p}%`;
       },
       err => {
-        console.error('Error loading model:', err);
+        console.error('Load error:', err);
         infoEl.textContent = '❌ Load error';
       }
     );
 
-    // Handle resize
+    // handle resize
     window.addEventListener('resize', () => {
       camera.aspect = innerWidth/innerHeight;
       camera.updateProjectionMatrix();
