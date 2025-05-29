@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>3D Model Loader</title>
+  <title>Ragdoll Demo: Model Loader</title>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
@@ -10,22 +10,23 @@
 </head>
 <body>
   <script type="module">
+    // ——— Import from CDN ———
     import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
     import { GLTFLoader } from 'https://unpkg.com/three@0.150.1/examples/jsm/loaders/GLTFLoader.js';
     import { OrbitControls } from 'https://unpkg.com/three@0.150.1/examples/jsm/controls/OrbitControls.js';
 
-    //–– Scene, Camera, Renderer
+    // ——— Scene, Camera, Renderer ———
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
 
-    const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 100);
     camera.position.set(0, 1.5, 3);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    //–– Simple lighting
+    // ——— Lighting ———
     const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
     hemi.position.set(0, 2, 0);
     scene.add(hemi);
@@ -34,35 +35,33 @@
     dir.position.set(5, 10, 7.5);
     scene.add(dir);
 
-    //–– Orbit controls (optional)
+    // ——— Controls ———
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 1, 0);
     controls.update();
 
-    //–– Load a GLTF model (replace URL with your own)
+    // ——— Load GLTF Model ———
     const loader = new GLTFLoader();
     loader.load(
+      // swap this URL for your own model path later:
       'https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf',
-      gltf => {
-        scene.add(gltf.scene);
-      },
-      xhr => console.log(`Loading model: ${(xhr.loaded/xhr.total*100).toFixed(0)}%`),
-      err => console.error('Model error:', err)
+      gltf => scene.add(gltf.scene),
+      xhr => console.log(`Model ${(xhr.loaded/xhr.total*100).toFixed(0)}% loaded`),
+      err => console.error('Error loading model:', err)
     );
 
-    //–– Handle resize
+    // ——— Handle Resize ———
     window.addEventListener('resize', () => {
-      camera.aspect = innerWidth/innerHeight;
+      camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth, innerHeight);
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    //–– Animation loop
-    function animate() {
+    // ——— Render Loop ———
+    (function animate() {
       requestAnimationFrame(animate);
       renderer.render(scene, camera);
-    }
-    animate();
+    })();
   </script>
 </body>
 </html>
