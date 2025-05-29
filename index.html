@@ -137,8 +137,8 @@
             const cone = new CANNON.ConeTwistConstraint(bodyC, bodyP, {
               pivotA: new CANNON.Vec3(0,0,0),
               pivotB: new CANNON.Vec3(0,0,0),
-              axisA:  new CANNON.Vec3(1,0,0),
-              axisB:  new CANNON.Vec3(1,0,0),
+              axisA:  new CANNON.Vec3(0,0,0),
+              axisB:  new CANNON.Vec3(0,0,0),
               angle:  Math.PI/4
             });
             world.addConstraint(cone);
