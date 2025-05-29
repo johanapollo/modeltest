@@ -2,9 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Rigging Step 2 (Bone Selection)</title>
-
-  <!-- IMPORT MAP -->
+  <title>Ragdoll Rigging: Verify Bone Markers</title>
   <script type="importmap">
   {
     "imports": {
@@ -14,7 +12,6 @@
     }
   }
   </script>
-
   <link rel="icon" href="data:,">
   <style>
     body { margin:0; overflow:hidden; }
@@ -27,7 +24,7 @@
   </style>
 </head>
 <body>
-  <div id="info">Loading…</div>
+  <div id="info">Loading and verifying bones…</div>
 
   <script type="module">
     import * as THREE        from 'three';
@@ -35,94 +32,121 @@
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
     import * as CANNON       from 'cannon-es';
 
-    // Scene & Camera
+    // Scene setup
     const scene    = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
     const camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 100);
-    camera.position.set(0, 3, 5);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    camera.position.set(0,3,5);
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
     renderer.setSize(innerWidth, innerHeight);
     document.body.appendChild(renderer.domElement);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0,1,0);
     controls.update();
 
-    // Helpers & lighting
-    scene.add(new THREE.AxesHelper(1), new THREE.GridHelper(10,10));
+    // Lights
     scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
-    const d = new THREE.DirectionalLight(0xffffff,0.8); d.position.set(5,10,7.5);
-    scene.add(d, new THREE.AmbientLight(0xffffff,0.5));
+    const dir = new THREE.DirectionalLight(0xffffff,0.8);
+    dir.position.set(5,10,7.5);
+    scene.add(dir);
+    scene.add(new THREE.AmbientLight(0xffffff,0.5));
 
-    // Physics world (zero-G for now)
-    const world = new CANNON.World();
-    world.gravity.set(0,0,0);
-    world.broadphase = new CANNON.NaiveBroadphase();
-    world.solver.iterations = 10;
-    const v3ToC = v=>new CANNON.Vec3(v.x,v.y,v.z);
-    const cToV3 = c=>new THREE.Vector3(c.x,c.y,c.z);
+    // Helper grid/axes
+    scene.add(new THREE.GridHelper(10,10));
+    scene.add(new THREE.AxesHelper(1));
 
     const infoEl = document.getElementById('info');
-    const loader = new GLTFLoader();
 
+    // Load model
+    const loader = new GLTFLoader();
     loader.load(
       './models/model.gltf',
-      (gltf) => {
-        infoEl.textContent = 'Model loaded. Check console for bone names.';
+      gltf => {
+        infoEl.textContent = 'Model loaded.';
 
         const model = gltf.scene;
         model.scale.set(0.25,0.25,0.25);
         scene.add(model);
 
-        // show skeleton
+        // Show skeleton helper
         const skel = new THREE.SkeletonHelper(model);
         skel.material.linewidth = 2;
-        skel.material.color.set(0x00ff00);
         scene.add(skel);
 
-        // find the SkinnedMesh
+        // Find the SkinnedMesh
         let skinned = null;
         model.traverse(o => o.isSkinnedMesh && (skinned = o));
         if (!skinned) {
-          console.warn('No SkinnedMesh found.');
-          infoEl.textContent = '⚠️ No rigged mesh.';
+          console.error('❌ No SkinnedMesh found in scene graph');
+          infoEl.textContent = '⚠️ No rigged mesh found.';
+          return;
+        }
+        console.log('SkinnedMesh:', skinned);
+
+        // YOUR BONE NAMES (exactly as in console, no index prefixes)
+        const childBoneName  = 'mixamorig_RightForeArm';  // ← EDIT THIS
+        const parentBoneName = 'mixamorig_RightArm';      // ← EDIT THIS
+
+        // Attempt lookups
+        const childBone  = skinned.skeleton.getBoneByName(childBoneName);
+        const parentBone = skinned.skeleton.getBoneByName(parentBoneName);
+
+        console.log('getBoneByName('+childBoneName+'): ', childBone);
+        console.log('getBoneByName('+parentBoneName+'): ', parentBone);
+
+        if (!childBone || !parentBone) {
+          console.error('❌ Bone lookup failed. Check the exact names and casing.');
+          infoEl.textContent = '⚠️ Bone lookup failed – see console for details.';
           return;
         }
 
-        // log all bone names with indexes
-        console.log('Bone list:');
-        skinned.skeleton.bones.forEach((b,i) => console.log(`${i}: ${b.name}`));
+        infoEl.textContent = 'Bones found! Placing markers…';
 
-        infoEl.textContent = 
-          'Open your console, find the index & name of the forearm (child) and upper arm (parent) bones, ' +
-          'then update the code at “// ← EDIT THESE” below.';
+        // Compute world positions
+        const posChild  = new THREE.Vector3();
+        const posParent = new THREE.Vector3();
+        childBone.getWorldPosition(posChild);
+        parentBone.getWorldPosition(posParent);
+        console.log('Child world pos:', posChild);
+        console.log('Parent world pos:', posParent);
 
-        // ← EDIT THESE TO MATCH YOUR MODEL’S BONE NAMES
-        const childBoneName  = 'mixamorigRightForeArm';
-        const parentBoneName = 'mixamorigRightShoulder';
+        // Helper to create an always-on-top sphere
+        function makeMarker(pos, color, label) {
+          const mat = new THREE.MeshBasicMaterial({ color });
+          mat.depthTest = false;
+          const mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2,16,16),
+            mat
+          );
+          mesh.renderOrder = 999;
+          mesh.position.copy(pos);
+          scene.add(mesh);
+          console.log(`Marker ${label} placed at`, pos);
+        }
 
-        // once you’ve replaced those strings, uncomment the lines below:
+        // Place red/blue markers
+        makeMarker(posChild,  0xff0000, 'child');
+        makeMarker(posParent, 0x0000ff, 'parent');
 
-        // const childBone  = skinned.skeleton.getBoneByName(childBoneName);
-        // const parentBone = skinned.skeleton.getBoneByName(parentBoneName);
-
-        // For now, we stop here so you can pick the correct names.
+        infoEl.textContent = '✅ Markers placed!';
       },
       xhr => {
         const pct = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?';
-        infoEl.textContent = `Loading… ${pct}%`;
+        infoEl.textContent = `Loading model… ${pct}%`;
       },
       err => {
-        console.error('Load error:', err);
-        infoEl.textContent = 'Error loading model.';
+        console.error('Error loading model:', err);
+        infoEl.textContent = '❌ Error loading model – check console.';
       }
     );
 
-    // render loop
+    // Render loop
     (function animate(){
       requestAnimationFrame(animate);
       renderer.render(scene, camera);
     })();
 
+    // Handle resize
     window.addEventListener('resize', ()=>{
       camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
