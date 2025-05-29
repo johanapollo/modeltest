@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Rigging Step 2 (Zero-G Markers)</title>
+  <title>Ragdoll Rigging Step 2 (Bone Selection)</title>
 
   <!-- IMPORT MAP -->
   <script type="importmap">
@@ -27,7 +27,7 @@
   </style>
 </head>
 <body>
-  <div id="info">Loading step 2…</div>
+  <div id="info">Loading…</div>
 
   <script type="module">
     import * as THREE        from 'three';
@@ -35,146 +35,95 @@
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
     import * as CANNON       from 'cannon-es';
 
-    // — SCENE & CAMERA —
-    const scene = new THREE.Scene();
+    // Scene & Camera
+    const scene    = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
-
-    const camera = new THREE.PerspectiveCamera(
-      75, window.innerWidth/window.innerHeight, 0.1, 100
-    );
-    camera.position.set(0,3,5);
-
-    const renderer = new THREE.WebGLRenderer({ antialias:true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 100);
+    camera.position.set(0, 3, 5);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
     document.body.appendChild(renderer.domElement);
-
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0,1,0);
     controls.update();
 
-    // — HELPERS & LIGHTS —
-    scene.add(new THREE.AxesHelper(1));
-    scene.add(new THREE.GridHelper(10,10));
+    // Helpers & lighting
+    scene.add(new THREE.AxesHelper(1), new THREE.GridHelper(10,10));
     scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
-    const dl = new THREE.DirectionalLight(0xffffff,0.8);
-    dl.position.set(5,10,7.5);
-    scene.add(dl);
-    scene.add(new THREE.AmbientLight(0xffffff,0.5));
+    const d = new THREE.DirectionalLight(0xffffff,0.8); d.position.set(5,10,7.5);
+    scene.add(d, new THREE.AmbientLight(0xffffff,0.5));
 
-    // — PHYSICS WORLD (zero-G) —
+    // Physics world (zero-G for now)
     const world = new CANNON.World();
-    world.gravity.set(0,0,0);             // ← NO GRAVITY
+    world.gravity.set(0,0,0);
     world.broadphase = new CANNON.NaiveBroadphase();
     world.solver.iterations = 10;
+    const v3ToC = v=>new CANNON.Vec3(v.x,v.y,v.z);
+    const cToV3 = c=>new THREE.Vector3(c.x,c.y,c.z);
 
-    const v3ToC = v => new CANNON.Vec3(v.x,v.y,v.z);
-    const cToV3 = c => new THREE.Vector3(c.x,c.y,c.z);
-
-    // — INFO ELEMENT —
     const infoEl = document.getElementById('info');
-
-    // — LOAD MODEL & PLACE MARKERS —
     const loader = new GLTFLoader();
+
     loader.load(
       './models/model.gltf',
-      gltf => {
-        infoEl.textContent = 'Model loaded. Placing markers…';
+      (gltf) => {
+        infoEl.textContent = 'Model loaded. Check console for bone names.';
 
         const model = gltf.scene;
         model.scale.set(0.25,0.25,0.25);
         scene.add(model);
 
-        // skeleton overlay
-        const skelHelper = new THREE.SkeletonHelper(model);
-        skelHelper.material.linewidth = 2;
-        scene.add(skelHelper);
+        // show skeleton
+        const skel = new THREE.SkeletonHelper(model);
+        skel.material.linewidth = 2;
+        skel.material.color.set(0x00ff00);
+        scene.add(skel);
 
-        // find SkinnedMesh
+        // find the SkinnedMesh
         let skinned = null;
         model.traverse(o => o.isSkinnedMesh && (skinned = o));
         if (!skinned) {
-          infoEl.textContent = '⚠️ No rigged mesh found.';
+          console.warn('No SkinnedMesh found.');
+          infoEl.textContent = '⚠️ No rigged mesh.';
           return;
         }
 
-        // log bones so you can see names
-        console.log('Bones:', skinned.skeleton.bones.map(b=>b.name));
+        // log all bone names with indexes
+        console.log('Bone list:');
+        skinned.skeleton.bones.forEach((b,i) => console.log(`${i}: ${b.name}`));
 
-        // pick the bone you saw at the elbow (example uses the first “right” match)
-        const childBone = skinned.skeleton.bones.find(b => /right/i.test(b.name));
-        const parentBone = childBone.parent;
+        infoEl.textContent = 
+          'Open your console, find the index & name of the forearm (child) and upper arm (parent) bones, ' +
+          'then update the code at “// ← EDIT THESE” below.';
 
-        infoEl.textContent = `Child: ${childBone.name}, Parent: ${parentBone.name}`;
+        // ← EDIT THESE TO MATCH YOUR MODEL’S BONE NAMES
+        const childBoneName  = 'ENTER_CHILD_BONE_NAME_HERE';
+        const parentBoneName = 'ENTER_PARENT_BONE_NAME_HERE';
 
-        // helper to create always-on-top spheres
-        function makeMarker(pos, color) {
-          const mat = new THREE.MeshBasicMaterial({ color });
-          mat.depthTest = false;
-          const mesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2,16,16),
-            mat
-          );
-          mesh.renderOrder = 999;
-          mesh.position.copy(pos);
-          scene.add(mesh);
-          return mesh;
-        }
+        // once you’ve replaced those strings, uncomment the lines below:
 
-        // get world positions
-        const posChild  = new THREE.Vector3();
-        const posParent = new THREE.Vector3();
-        childBone .getWorldPosition(posChild);
-        parentBone.getWorldPosition(posParent);
+        // const childBone  = skinned.skeleton.getBoneByName(childBoneName);
+        // const parentBone = skinned.skeleton.getBoneByName(parentBoneName);
 
-        // create markers
-        const markerChild  = makeMarker(posChild,  0xff0000); // red
-        const markerParent = makeMarker(posParent, 0x0000ff); // blue
-
-        // create matching zero-G bodies
-        const bodyChild  = new CANNON.Body({
-          mass: 1,
-          shape: new CANNON.Sphere(0.2),
-          position: v3ToC(posChild)
-        });
-        const bodyParent = new CANNON.Body({
-          mass: 0,
-          shape: new CANNON.Sphere(0.2),
-          position: v3ToC(posParent)
-        });
-        world.addBody(bodyChild);
-        world.addBody(bodyParent);
-
-        // ball-and-socket between them
-        world.addConstraint(new CANNON.PointToPointConstraint(
-          bodyChild, new CANNON.Vec3(0,0,0),
-          bodyParent, new CANNON.Vec3(0,0,0)
-        ));
-
-        infoEl.textContent += ' | Markers placed.';
-
-        // animate and sync
-        const clock = new THREE.Clock();
-        (function animate() {
-          requestAnimationFrame(animate);
-          const dt = clock.getDelta();
-          world.step(1/60, dt, 3);
-          markerChild.position.copy(cToV3(bodyChild.position));
-          markerParent.position.copy(cToV3(bodyParent.position));
-          renderer.render(scene, camera);
-        })();
+        // For now, we stop here so you can pick the correct names.
       },
       xhr => {
-        const pct = xhr.total ? ((xhr.loaded/xhr.total)*100).toFixed(0) : '?';
+        const pct = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?';
         infoEl.textContent = `Loading… ${pct}%`;
       },
       err => {
-        console.error(err);
-        infoEl.textContent = 'Error loading model – see console.';
+        console.error('Load error:', err);
+        infoEl.textContent = 'Error loading model.';
       }
     );
 
-    // — RESIZE HANDLER —
-    window.addEventListener('resize', ()=> {
+    // render loop
+    (function animate(){
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    })();
+
+    window.addEventListener('resize', ()=>{
       camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
