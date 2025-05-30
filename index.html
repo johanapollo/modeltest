@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ragdoll Demo: Natural Joint Constraints (Fixed)</title>
+  <title>Ragdoll Demo: Clamped Shoulder Motion</title>
 
   <!-- import map for Three.js & Cannon-es -->
   <script type="importmap">
@@ -35,18 +35,18 @@
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
     import * as CANNON       from 'cannon-es';
 
-    // — Scene, Camera, Renderer —
+    // — Scene & Camera —
     const scene  = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
     const camera = new THREE.PerspectiveCamera(
       75, window.innerWidth/window.innerHeight, 0.1, 100
     );
-    camera.position.set(0,3,100);
+    camera.position.set(0,3,5);
     const renderer = new THREE.WebGLRenderer({ antialias:true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // — OrbitControls —
+    // — Controls —
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0,1,0);
     controls.update();
@@ -60,7 +60,7 @@
 
     // — Physics World —
     const world = new CANNON.World();
-    world.gravity.set(0, -6, 0);
+    world.gravity.set(0, -9.82, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
     world.solver.iterations = 10;
 
@@ -80,7 +80,7 @@
         model.scale.set(0.25,0.25,0.25);
         scene.add(model);
 
-        // overlay skeleton
+        // skeleton overlay
         const skel = new THREE.SkeletonHelper(model);
         skel.material.linewidth = 2;
         scene.add(skel);
@@ -89,18 +89,18 @@
         let skinned = null;
         model.traverse(o => { if (o.isSkinnedMesh) skinned = o; });
         if (!skinned) {
-          infoEl.textContent = '⚠️ No rigged mesh!';
+          infoEl.textContent = '⚠️ No rigged mesh found.';
           return;
         }
 
-        // define bone-pairs and joint types
+        // 1) Define bone-pairs and joint types
         const bonePairs = [
           { child: 'mixamorigRightForeArm', parent: 'mixamorigRightArm',     type: 'hinge' }, // elbow
           { child: 'mixamorigRightArm',     parent: 'mixamorigRightShoulder', type: 'cone'  }, // shoulder
           { child: 'mixamorigRightShoulder',parent: 'mixamorigSpine2',       type: 'ball'  }  // to spine
         ];
 
-        // create physics bodies & constraints
+        // 2) Create physics bodies & constraints
         const bodies = {};
         bonePairs.forEach(({ child, parent, type }) => {
           const bC = skinned.skeleton.getBoneByName(child);
@@ -110,20 +110,26 @@
           bC.getWorldPosition(posC);
           bP.getWorldPosition(posP);
 
-          // damping makes it behave more “muscle‐like”
+          // increased damping for smoother, muscle-like motion
           const bodyC = new CANNON.Body({
-            mass: 1, shape: new CANNON.Sphere(0.15),
-            position: v3ToC(posC), angularDamping: 0.9, linearDamping: 0.9
+            mass: 1,
+            shape: new CANNON.Sphere(0.15),
+            position: v3ToC(posC),
+            angularDamping: 0.95,
+            linearDamping:  0.95
           });
           const bodyP = new CANNON.Body({
-            mass: 0, shape: new CANNON.Sphere(0.15),
-            position: v3ToC(posP), angularDamping: 0.9, linearDamping: 0.9
+            mass: 0,
+            shape: new CANNON.Sphere(0.15),
+            position: v3ToC(posP),
+            angularDamping: 0.95,
+            linearDamping:  0.95
           });
           world.addBody(bodyC);
           world.addBody(bodyP);
 
           if (type === 'hinge') {
-            // elbow hinge: free rotation around local Z
+            // elbow hinge (free around Z)
             const hinge = new CANNON.HingeConstraint(bodyC, bodyP, {
               pivotA: new CANNON.Vec3(0,0,0),
               axisA:  new CANNON.Vec3(0,0,1),
@@ -133,22 +139,23 @@
             world.addConstraint(hinge);
 
           } else if (type === 'cone') {
-            // shoulder cone‐twist: ±45°
+            // shoulder cone-twist with a swing limit
             const cone = new CANNON.ConeTwistConstraint(bodyC, bodyP, {
-              pivotA: new CANNON.Vec3(0,1,0),
-              pivotB: new CANNON.Vec3(0,1,0),
-              axisA:  new CANNON.Vec3(0,1,0),
+              pivotA: new CANNON.Vec3(0,0,0),
+              pivotB: new CANNON.Vec3(0,0,0),
+              axisA:  new CANNON.Vec3(1,0,0),
               axisB:  new CANNON.Vec3(1,0,0),
-              angle:  Math.PI/4
+              angle:  Math.PI/4 // ±45°
             });
             world.addConstraint(cone);
 
           } else {
-            // ball‐and‐socket fallback
-            world.addConstraint(new CANNON.PointToPointConstraint(
+            // ball-and-socket fallback
+            const p2p = new CANNON.PointToPointConstraint(
               bodyC, new CANNON.Vec3(0,0,0),
               bodyP, new CANNON.Vec3(0,0,0)
-            ));
+            );
+            world.addConstraint(p2p);
           }
 
           bodies[child]  = bodyC;
@@ -157,34 +164,48 @@
 
         infoEl.textContent = 'Ragdoll physics initialized.';
 
-        // animate: step physics & drive bones
+        // 3) Animation loop: step physics & drive bones
         const clock = new THREE.Clock();
         (function animate() {
           requestAnimationFrame(animate);
 
+          // step physics
           const dt = clock.getDelta();
           world.step(1/60, dt, 3);
 
-          bonePairs.forEach(({ child, parent }) => {
+          bonePairs.forEach(({ child, parent, type }) => {
             const bC = bodies[child], bP = bodies[parent];
             const boneC = skinned.skeleton.getBoneByName(child);
             const boneP = skinned.skeleton.getBoneByName(parent);
 
+            // world positions
             const wC = cToV3(bC.position);
             const wP = cToV3(bP.position);
             const dir = wC.clone().sub(wP).normalize();
 
-            // rotate bone’s +X to match dir
+            // quaternion rotating +X → dir
             const worldQuat = new THREE.Quaternion()
               .setFromUnitVectors(new THREE.Vector3(1,0,0), dir);
 
-            // convert into parent‐local space
+            // convert into parent-local space
             boneP.updateWorldMatrix(true,false);
-            const pWq = new THREE.Quaternion();
-            boneP.getWorldQuaternion(pWq);
-            const localQuat = pWq.clone().invert().multiply(worldQuat);
+            const pwq = new THREE.Quaternion();
+            boneP.getWorldQuaternion(pwq);
+            const localQuat = pwq.clone().invert().multiply(worldQuat);
 
-            boneC.quaternion.copy(localQuat);
+            if (type === 'cone') {
+              // clamp shoulder euler angles for realistic limits
+              const e = new THREE.Euler().setFromQuaternion(localQuat, 'XYZ');
+              // flexion/extension: -30° to +120°
+              e.x = THREE.MathUtils.clamp(e.x, -Math.PI/6, 2.094);   // -30° → 120°
+              // abduction/adduction: ±60°
+              e.y = THREE.MathUtils.clamp(e.y, -Math.PI/3, Math.PI/3);
+              // twist: ±45°
+              e.z = THREE.MathUtils.clamp(e.z, -Math.PI/4, Math.PI/4);
+              boneC.quaternion.setFromEuler(e);
+            } else {
+              boneC.quaternion.copy(localQuat);
+            }
           });
 
           renderer.render(scene, camera);
